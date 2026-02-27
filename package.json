@@ -11,7 +11,13 @@
   "bin": {
     "simple-task-board": "./index.js"
   },
-  "keywords": ["cli", "simple-task-board", "sqlite", "typescript", "kanban"],
+  "keywords": [
+    "cli",
+    "simple-task-board",
+    "sqlite",
+    "typescript",
+    "kanban"
+  ],
   "author": "Richard Anaya",
   "license": "MIT",
   "repository": {
@@ -21,15 +27,18 @@
   "files": [
     "index.js",
     "db.js",
+    "server.js",
     "README.md",
     "LICENSE"
   ],
   "type": "commonjs",
   "dependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
     "@types/node": "^25.3.2",
     "better-sqlite3": "^12.6.2",
     "commander": "^14.0.3",
+    "express": "^5.2.1",
     "typescript": "^5.9.3"
   }
 }

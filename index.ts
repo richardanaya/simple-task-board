@@ -477,4 +477,15 @@ program
     }
   });
 
+// Serve
+program
+  .command('serve')
+  .description('Start a web server to view and manage the task board using an HTMX-powered web interface with Pico.css styling.')
+  .option('-p, --port <port>', 'Port to run the server on', '7788')
+  .option('-h, --host <host>', 'Host to bind the server to', 'localhost')
+  .action((options) => {
+    const { startServer } = require('./server');
+    startServer(parseInt(options.port), options.host);
+  });
+
 program.parse();
