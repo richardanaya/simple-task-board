@@ -1,5 +1,5 @@
 {
-  "name": "task-board",
+  "name": "simple-task-board",
   "version": "0.0.0",
   "description": "A CLI tool for managing a task board with columns, dependencies, and transition tracking.",
   "main": "index.js",
@@ -9,14 +9,14 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "bin": {
-    "task-board": "./index.js"
+    "simple-task-board": "./index.js"
   },
-  "keywords": ["cli", "task-board", "sqlite", "typescript", "kanban"],
+  "keywords": ["cli", "simple-task-board", "sqlite", "typescript", "kanban"],
   "author": "Richard Anaya",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git@github.com:richardanaya/task-board.git"
+    "url": "git@github.com:richardanaya/simple-task-board.git"
   },
   "files": [
     "index.js",

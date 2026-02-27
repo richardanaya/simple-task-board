@@ -1,6 +1,6 @@
-# Task Board
+# Simple Task Board
 
-[![npm version](https://badge.fury.io/js/task-board.svg)](https://badge.fury.io/js/task-board)
+[![npm version](https://badge.fury.io/js/simple-task-board.svg)](https://badge.fury.io/js/simple-task-board)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A command-line tool for managing a task board with columns, dependencies, and transition tracking. Built with TypeScript and SQLite.
@@ -17,27 +17,27 @@ A command-line tool for managing a task board with columns, dependencies, and tr
 ## Installation
 
 ```bash
-npm install -g task-board
+npm install -g simple-task-board
 ```
 
 ## Usage
 
-After installation, use the `task-board` command.
+After installation, use the `simple-task-board` command.
 
 ### Getting Started
 
 ```bash
 # Add a new task
-task-board add -i "task1" -t "Implement feature" -c "idea"
+simple-task-board add -i "task1" -t "Implement feature" -c "idea"
 
 # List all tasks
-task-board list
+simple-task-board list
 
 # Move a task to another column
-task-board move "task1" "working on"
+simple-task-board move "task1" "working on"
 
 # View help
-task-board --help
+simple-task-board --help
 ```
 
 ### Available Commands
@@ -69,14 +69,14 @@ task-board --help
 
 ## Database
 
-- Uses `task-board.db` (SQLite) in the current directory.
+- Uses `simple-task-board.db` (SQLite) in the current directory.
 - Tables: `tasks`, `task_dependencies`, `task_transitions`.
 
 ## Development
 
 ```bash
-git clone git@github.com:richardanaya/task-board.git
-cd task-board
+git clone git@github.com:richardanaya/simple-task-board.git
+cd simple-task-board
 npm install
 npm run build
 npm link

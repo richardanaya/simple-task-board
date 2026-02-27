@@ -19,7 +19,7 @@ export interface Transition {
   timestamp: string;
 }
 
-const db: Database.Database = new Database('task-board.db');
+const db: Database.Database = new Database('simple-task-board.db');
 
 // Create tables
 db.exec(`
