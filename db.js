@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
-const db = new better_sqlite3_1.default('task-board.db');
+const db = new better_sqlite3_1.default('simple-task-board.db');
 // Create tables
 db.exec(`
   CREATE TABLE IF NOT EXISTS tasks (
