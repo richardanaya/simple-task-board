@@ -1,6 +1,6 @@
 {
   "name": "simple-task-board",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "A CLI tool for managing a task board with columns, dependencies, and transition tracking.",
   "main": "index.js",
   "scripts": {
