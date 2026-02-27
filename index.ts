@@ -1,0 +1,480 @@
+#!/usr/bin/env node
+
+import { Command } from 'commander';
+import db, { Task, Transition, ColumnName } from './db';
+
+const program = new Command();
+
+// Prepared statements
+const insertTask = db.prepare(`
+  INSERT INTO tasks (id, title, description, assignee, column_name)
+  VALUES (?, ?, ?, ?, ?)
+`);
+
+const updateTask = db.prepare(`
+  UPDATE tasks SET title = ?, description = ?, assignee = ?, column_name = ?
+  WHERE id = ?
+`);
+
+const deleteTask = db.prepare('DELETE FROM tasks WHERE id = ?');
+
+const insertDependency = db.prepare(`
+  INSERT OR IGNORE INTO task_dependencies (task_id, depends_on_id)
+  VALUES (?, ?)
+`);
+
+const deleteDependencies = db.prepare('DELETE FROM task_dependencies WHERE task_id = ?');
+
+const updateAssignee = db.prepare('UPDATE tasks SET assignee = ? WHERE id = ?');
+
+const insertTransition = db.prepare('INSERT INTO task_transitions (task_id, from_column, to_column) VALUES (?, ?, ?)');
+
+const deleteDependency = db.prepare('DELETE FROM task_dependencies WHERE task_id = ? AND depends_on_id = ?');
+
+const getTransitions = db.prepare('SELECT * FROM task_transitions WHERE task_id = ? ORDER BY timestamp');
+
+const getAllTransitions = db.prepare('SELECT * FROM task_transitions ORDER BY timestamp');
+
+const getAllTasks = db.prepare('SELECT * FROM tasks');
+
+const getTaskById = db.prepare('SELECT * FROM tasks WHERE id = ?');
+
+const getDependencies = db.prepare('SELECT depends_on_id FROM task_dependencies WHERE task_id = ?');
+
+// Helper to get task with dependencies
+function getTaskWithDeps(taskId: string): Task | null {
+  const task = getTaskById.get(taskId) as Task | undefined;
+  if (!task) return null;
+  const deps = getDependencies.all(taskId).map((row: any) => row.depends_on_id as string);
+  return { ...task, dependencies: deps };
+}
+
+// Commands
+program
+  .name('task-board')
+  .description('A CLI tool for managing a task board with columns, dependencies, and transition tracking. Supports CRUD operations on tasks, searching, assigning, and viewing statistics.')
+  .version('1.0.0')
+  .addHelpText('after', `
+Available Columns: idea, approved idea, working on, blocked, ready for review, done
+
+Primary Workflows for AI Agents:
+- Task Lifecycle: Create (add), view (list/show), modify (update/move), complete (move to 'done'), delete
+- Assignment Management: Assign tasks (assign), reassign (update -a), unassign, view my tasks (my-tasks)
+- Dependency Handling: Add/remove dependencies (dependency add/remove or update --dependencies)
+- Progress Tracking: Move between columns (move), view history (history), analyze time in columns (transition-stats)
+- Searching & Reporting: Find tasks (search), get column counts (stats)
+Examples:
+  task-board add -i "task1" -t "Implement feature" -c "idea"
+  task-board move "task1" "working on"
+  task-board my-tasks "AI Agent" "working on"  # Recent tasks assigned to me in a column
+  task-board dependency add "task2" "task1"
+  task-board search -c "blocked"
+  task-board transition-stats
+`);
+
+interface AddOptions {
+  id: string;
+  title: string;
+  description?: string;
+  assignee?: string;
+  column: ColumnName;
+  dependencies?: string[];
+}
+
+interface UpdateOptions {
+  title?: string;
+  description?: string;
+  assignee?: string;
+  column?: ColumnName;
+  dependencies?: string[];
+}
+
+// Add task
+program
+  .command('add')
+  .description('Create a new task with ID, title, optional description, assignee, column, and dependencies. Records initial transition to the column.')
+  .requiredOption('-i, --id <id>', 'Task ID (string, required)')
+  .requiredOption('-t, --title <title>', 'Task title (string, required)')
+  .option('-d, --description <desc>', 'Task description in markdown format (string, optional)')
+  .option('-a, --assignee <assignee>', 'Assignee name (string, optional)')
+  .requiredOption('-c, --column <column>', 'Initial column: idea, approved idea, working on, blocked, ready for review, done (string, required)')
+  .option('--dependencies <deps>', 'Comma-separated list of task IDs this task depends on (e.g., "task1,task2") (string, optional)')
+  .action((options: AddOptions) => {
+    try {
+      insertTask.run(options.id, options.title, options.description || '', options.assignee || '', options.column);
+      insertTransition.run(options.id, null, options.column);
+      if (options.dependencies) {
+        for (const depId of options.dependencies) {
+          insertDependency.run(options.id, depId);
+        }
+      }
+      console.log(`Task added with ID: ${options.id}`);
+    } catch (err) {
+      console.error('Error adding task:', (err as Error).message);
+    }
+  });
+
+// List tasks
+program
+  .command('list')
+  .description('Display a table of all tasks with their details, including dependencies.')
+  .action(() => {
+    const tasks = (getAllTasks.all() as Task[]).map((task: Task) => {
+      const deps = getDependencies.all(task.id).map((row: any) => row.depends_on_id as number);
+      return { ...task, dependencies: deps };
+    });
+    console.table(tasks);
+  });
+
+// Show task
+program
+  .command('show <id>')
+  .description('Display detailed information for a single task by ID, including dependencies.')
+  .action((id: string) => {
+    const task = getTaskWithDeps(id);
+    if (task) {
+      console.log(task);
+    } else {
+      console.error('Task not found');
+    }
+  });
+
+// Update task
+program
+  .command('update <id>')
+  .description('Update an existing task by ID. Specify only the fields to change. Records transition if column changes.')
+  .option('-t, --title <title>', 'New title (string)')
+  .option('-d, --description <desc>', 'New description in markdown (string)')
+  .option('-a, --assignee <assignee>', 'New assignee name (string)')
+  .option('-c, --column <column>', 'New column: idea, approved idea, working on, blocked, ready for review, done (string)')
+  .option('--dependencies <deps>', 'Comma-separated list of dependency task IDs to replace existing ones (e.g., "1,2") (string)')
+  .action((id: string, options: UpdateOptions) => {
+    try {
+      const task = getTaskById.get(id) as Task | undefined;
+      if (!task) {
+        console.error('Task not found');
+        return;
+      }
+      const newTitle = options.title || task.title;
+      const newDesc = options.description !== undefined ? options.description : task.description;
+      const newAssignee = options.assignee !== undefined ? options.assignee : task.assignee;
+      const newColumn = options.column || task.column_name;
+      if (options.column && options.column !== task.column_name) {
+        insertTransition.run(id, task.column_name, options.column);
+      }
+      updateTask.run(newTitle, newDesc, newAssignee, newColumn, id);
+      if (options.dependencies !== undefined) {
+        deleteDependencies.run(id);
+        for (const depId of options.dependencies) {
+          insertDependency.run(id, depId);
+        }
+      }
+      console.log('Task updated');
+    } catch (err) {
+      console.error('Error updating task:', (err as Error).message);
+    }
+  });
+
+// Delete task
+program
+  .command('delete <id>')
+  .description('Delete a task by ID, including all its dependencies and transition history.')
+  .action((id: string) => {
+    try {
+      deleteDependencies.run(id);
+      const result = deleteTask.run(id);
+      if (result.changes > 0) {
+        console.log('Task deleted');
+      } else {
+        console.error('Task not found');
+      }
+    } catch (err) {
+      console.error('Error deleting task:', (err as Error).message);
+    }
+  });
+
+interface SearchOptions {
+  title?: string;
+  column?: ColumnName;
+  assignee?: string;
+}
+
+// Search tasks
+program
+  .command('search')
+  .description('Search for tasks matching any of the specified criteria (title prefix, column, assignee). Displays matching tasks with dependencies.')
+  .option('-t, --title <prefix>', 'Search for tasks whose title starts with this prefix (string)')
+  .option('-c, --column <column>', 'Filter by exact column name (string)')
+  .option('-a, --assignee <assignee>', 'Filter by exact assignee name (string)')
+  .action((options: SearchOptions) => {
+    try {
+      let query = 'SELECT * FROM tasks WHERE 1=1';
+      const params: any[] = [];
+      if (options.title) {
+        query += ' AND title LIKE ?';
+        params.push(`${options.title}%`);
+      }
+      if (options.column) {
+        query += ' AND column_name = ?';
+        params.push(options.column);
+      }
+      if (options.assignee) {
+        query += ' AND assignee = ?';
+        params.push(options.assignee);
+      }
+      const stmt = db.prepare(query);
+      const tasks = stmt.all(...params) as Task[];
+      const results = tasks.map(task => {
+        const deps = getDependencies.all(task.id).map((row: any) => row.depends_on_id as number);
+        return { ...task, dependencies: deps };
+      });
+      if (results.length > 0) {
+        console.table(results);
+      } else {
+        console.log('No tasks found matching the criteria.');
+      }
+    } catch (err) {
+      console.error('Error searching tasks:', (err as Error).message);
+    }
+  });
+
+// Assign task
+program
+  .command('assign <id> <assignee>')
+  .description('Assign a task to a specific assignee by updating the assignee field.')
+  .action((id: string, assignee: string) => {
+    try {
+      const result = updateAssignee.run(assignee, id);
+      if (result.changes > 0) {
+        console.log(`Task ${id} assigned to ${assignee}`);
+      } else {
+        console.error('Task not found');
+      }
+    } catch (err) {
+      console.error('Error assigning task:', (err as Error).message);
+    }
+  });
+
+// Stats
+program
+  .command('stats')
+  .description('Display the count of tasks currently in each column.')
+  .action(() => {
+    try {
+      const columns: ColumnName[] = ['idea', 'approved idea', 'working on', 'blocked', 'ready for review', 'done'];
+      const stats: { [key in ColumnName]: number } = {} as any;
+      for (const col of columns) {
+        const stmt = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE column_name = ?');
+        const result = stmt.get(col) as { count: number };
+        stats[col] = result.count;
+      }
+      console.log('Task Statistics:');
+      for (const col of columns) {
+        console.log(`${col}: ${stats[col]}`);
+      }
+    } catch (err) {
+      console.error('Error getting stats:', (err as Error).message);
+    }
+  });
+
+// History
+program
+  .command('history <id>')
+  .description('Display the transition history (column changes with timestamps) for a specific task by ID.')
+  .action((id: string) => {
+    try {
+      const transitions = getTransitions.all(id) as Transition[];
+      if (transitions.length > 0) {
+        console.table(transitions);
+      } else {
+        console.log('No transitions found for this task.');
+      }
+    } catch (err) {
+      console.error('Error getting history:', (err as Error).message);
+    }
+  });
+
+// Transition Stats
+program
+  .command('transition-stats')
+  .description('Calculate and display average time spent in each column based on transition history, including ongoing tasks.')
+  .action(() => {
+    try {
+      const columns: ColumnName[] = ['idea', 'approved idea', 'working on', 'blocked', 'ready for review', 'done'];
+      const columnTimes: { [key in ColumnName]: number[] } = {} as any;
+      for (const col of columns) {
+        columnTimes[col] = [];
+      }
+
+      // Get all tasks
+      const tasks = getAllTasks.all() as Task[];
+      const now = new Date().getTime();
+
+      for (const task of tasks) {
+        const transitions = getTransitions.all(task.id) as Transition[];
+        if (transitions.length === 0) continue;
+
+        // Sort transitions by timestamp
+        transitions.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+        let prevTime = new Date(transitions[0].timestamp).getTime();
+        let prevColumn = transitions[0].to_column;
+
+        for (let i = 1; i < transitions.length; i++) {
+          const trans = transitions[i];
+          const time = new Date(trans.timestamp).getTime();
+          const duration = time - prevTime;
+          if (columnTimes[prevColumn as ColumnName]) {
+            columnTimes[prevColumn as ColumnName].push(duration);
+          }
+          prevTime = time;
+          prevColumn = trans.to_column;
+        }
+
+        // From last transition to now, if not done
+        if (task.column_name !== 'done') {
+          const duration = now - prevTime;
+          if (columnTimes[prevColumn as ColumnName]) {
+            columnTimes[prevColumn as ColumnName].push(duration);
+          }
+        }
+      }
+
+      console.log('Transition Statistics (Average time in ms):');
+      for (const col of columns) {
+        const times = columnTimes[col];
+        if (times.length > 0) {
+          const avg = times.reduce((a, b) => a + b, 0) / times.length;
+          console.log(`${col}: ${Math.round(avg)} ms (${times.length} instances)`);
+        } else {
+          console.log(`${col}: No data`);
+        }
+      }
+    } catch (err) {
+      console.error('Error getting transition stats:', (err as Error).message);
+    }
+  });
+
+// Move
+program
+  .command('move <id> <column>')
+  .description('Move a task to a new column and record the transition. Validates column name and checks if task exists.')
+  .action((id: string, column: string) => {
+    try {
+      const validColumns: ColumnName[] = ['idea', 'approved idea', 'working on', 'blocked', 'ready for review', 'done'];
+      if (!validColumns.includes(column as ColumnName)) {
+        console.error('Invalid column. Valid columns: idea, approved idea, working on, blocked, ready for review, done');
+        return;
+      }
+      const task = getTaskById.get(id) as Task | undefined;
+      if (!task) {
+        console.error('Task not found');
+        return;
+      }
+      if (task.column_name === column) {
+        console.log('Task is already in that column');
+        return;
+      }
+      insertTransition.run(id, task.column_name, column);
+      updateTask.run(task.title, task.description, task.assignee, column, id);
+      console.log(`Task ${id} moved to "${column}"`);
+    } catch (err) {
+      console.error('Error moving task:', (err as Error).message);
+    }
+  });
+
+// Dependency subcommands
+const dependencyCmd = program
+  .command('dependency')
+  .description('Manage task dependencies: add or remove specific dependencies without affecting others.');
+
+dependencyCmd
+  .command('add <taskId> <depId>')
+  .description('Add a dependency: make task <taskId> depend on <depId>. Validates that both tasks exist.')
+  .action((taskId: string, depId: string) => {
+    try {
+      const task = getTaskById.get(taskId) as Task | undefined;
+      const depTask = getTaskById.get(depId) as Task | undefined;
+      if (!task) {
+        console.error('Task not found');
+        return;
+      }
+      if (!depTask) {
+        console.error('Dependency task not found');
+        return;
+      }
+      insertDependency.run(taskId, depId);
+      console.log(`Dependency added: Task ${taskId} depends on ${depId}`);
+    } catch (err) {
+      console.error('Error adding dependency:', (err as Error).message);
+    }
+  });
+
+dependencyCmd
+  .command('remove <taskId> <depId>')
+  .description('Remove a specific dependency: remove <depId> from the dependencies of <taskId>.')
+  .action((taskId: string, depId: string) => {
+    try {
+      const result = deleteDependency.run(taskId, depId);
+      if (result.changes > 0) {
+        console.log(`Dependency removed: Task ${taskId} no longer depends on ${depId}`);
+      } else {
+        console.error('Dependency not found');
+      }
+    } catch (err) {
+      console.error('Error removing dependency:', (err as Error).message);
+    }
+  });
+
+// Unassign
+program
+  .command('unassign <id>')
+  .description('Remove the assignee from a task by setting the assignee field to null.')
+  .action((id: string) => {
+    try {
+      const result = updateAssignee.run(null, id);
+      if (result.changes > 0) {
+        console.log(`Task ${id} unassigned`);
+      } else {
+        console.error('Task not found');
+      }
+    } catch (err) {
+      console.error('Error unassigning task:', (err as Error).message);
+    }
+  });
+
+// My Tasks
+program
+  .command('my-tasks <assignee> [column]')
+  .description('Show tasks assigned to a specific user, optionally filtered by column. Sorted by task ID (recent first).')
+  .action((assignee: string, column?: string) => {
+    try {
+      let query = 'SELECT * FROM tasks WHERE assignee = ?';
+      const params: any[] = [assignee];
+      if (column) {
+        const validColumns: ColumnName[] = ['idea', 'approved idea', 'working on', 'blocked', 'ready for review', 'done'];
+        if (!validColumns.includes(column as ColumnName)) {
+          console.error('Invalid column. Valid columns: idea, approved idea, working on, blocked, ready for review, done');
+          return;
+        }
+        query += ' AND column_name = ?';
+        params.push(column);
+      }
+      query += ' ORDER BY id DESC';
+      const stmt = db.prepare(query);
+      const tasks = stmt.all(...params) as Task[];
+      const results = tasks.map(task => {
+        const deps = getDependencies.all(task.id).map((row: any) => row.depends_on_id as number);
+        return { ...task, dependencies: deps };
+      });
+      if (results.length > 0) {
+        console.table(results);
+      } else {
+        console.log('No tasks found for this assignee' + (column ? ` in column "${column}"` : ''));
+      }
+    } catch (err) {
+      console.error('Error fetching my tasks:', (err as Error).message);
+    }
+  });
+
+program.parse();
