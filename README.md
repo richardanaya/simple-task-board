@@ -27,6 +27,12 @@ After installation, use the `simple-task-board` command.
 ### Getting Started
 
 ```bash
+# Initialize the task board (creates database and tables)
+simple-task-board init
+
+# Or initialize with sample data
+simple-task-board init --sample
+
 # Add a new task
 simple-task-board add -i "task1" -t "Implement feature" -c "idea"
 
@@ -36,11 +42,18 @@ simple-task-board list
 # Move a task to another column
 simple-task-board move "task1" "working on"
 
+# Start the web interface
+simple-task-board serve
+
 # View help
 simple-task-board --help
 ```
 
 ### Available Commands
+
+#### Setup
+- `init [options]`: Initialize database and optionally create sample data
+- `serve [options]`: Start web interface
 
 #### Task Operations
 - `add [options]`: Create a new task

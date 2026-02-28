@@ -442,6 +442,57 @@ program
         console.error('Error fetching my tasks:', err.message);
     }
 });
+// Init
+program
+    .command('init')
+    .description('Initialize the task board database and show getting started information.')
+    .option('--sample', 'Create sample tasks for demonstration')
+    .action((options) => {
+    try {
+        // The database is initialized when db is imported, but let's verify it works
+        const taskCount = db_1.default.prepare('SELECT COUNT(*) as count FROM tasks').get();
+        console.log('✅ Task board database initialized successfully!');
+        console.log(`📊 Current tasks: ${taskCount.count}`);
+        if (options.sample) {
+            // Create sample tasks
+            const sampleTasks = [
+                { id: 'welcome', title: 'Welcome to Task Board', description: 'This is your first task!', assignee: 'You', column: 'idea' },
+                { id: 'feature-x', title: 'Implement Feature X', description: 'A new feature for the application', assignee: 'Developer', column: 'working on' },
+                { id: 'bug-fix', title: 'Fix Critical Bug', description: 'Important bug that needs fixing', assignee: 'Developer', column: 'blocked' },
+                { id: 'review-pr', title: 'Review Pull Request', description: 'Code review for recent changes', assignee: 'Reviewer', column: 'ready for review' },
+                { id: 'deploy-prod', title: 'Deploy to Production', description: 'Release new version to production', assignee: 'DevOps', column: 'done' },
+            ];
+            for (const task of sampleTasks) {
+                try {
+                    insertTask.run(task.id, task.title, task.description, task.assignee, task.column);
+                    insertTransition.run(task.id, null, task.column);
+                }
+                catch (err) {
+                    // Task might already exist, skip
+                }
+            }
+            // Add some dependencies
+            try {
+                insertDependency.run('feature-x', 'welcome');
+                insertDependency.run('deploy-prod', 'feature-x');
+                insertDependency.run('deploy-prod', 'bug-fix');
+            }
+            catch (err) {
+                // Dependencies might already exist
+            }
+            console.log('📝 Created sample tasks for demonstration');
+        }
+        console.log('\n🚀 Quick start:');
+        console.log('  task-board add -i "my-task" -t "My First Task" -c "idea"');
+        console.log('  task-board list');
+        console.log('  task-board serve');
+        console.log('  task-board --help');
+    }
+    catch (err) {
+        console.error('❌ Error initializing database:', err.message);
+        process.exit(1);
+    }
+});
 // Serve
 program
     .command('serve')
